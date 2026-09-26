@@ -7,86 +7,18 @@
 #include <fstream>
 #include <string>
 #include "ThreadPool.hpp"
+#include "client_handler.hpp"
+#include "Semaphore.hpp"
+#include "transfer_registry.hpp"
+#include <atomic>
 
-std::string readLine(int fd) {
-    std::string line;
-    char c;
-    while (true) {
-        ssize_t n = recv(fd, &c, 1, 0);
-        if (n <= 0) break;
-        if (c == '\n') break;
-        line += c;
+void statsLogger(Stats& stats, std::atomic<bool>& running) {
+    while (running.load(std::memory_order_relaxed)) {
+        std::cout << "[STATS] active=" << stats.activeTransferCount.load()
+                   << " totalBytes=" << stats.totalBytesTransferred.load()
+                   << "\n";
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
-    return line;
-}
-
-bool sendAll(int fd, const char* data, size_t len) {
-    size_t totalSent = 0;
-    while (totalSent < len) {
-        ssize_t n = send(fd, data + totalSent, len - totalSent, 0);
-        if (n <= 0) {
-            return false; // error or connection closed
-        }
-        totalSent += n;
-    }
-    return true;
-}
-void handleClient(int client_fd) {
-     std::cout << "[Thread " << std::this_thread::get_id()
-              << "] handling client fd=" << client_fd << "\n";
-
-    std::cout << "Client connected!\n";
-
-    std::string request = readLine(client_fd);
-
-    std::string command, filename;
-    size_t spacePos = request.find(' ');
-    if (spacePos != std::string::npos) {
-        command = request.substr(0, spacePos);
-        filename = request.substr(spacePos + 1);
-    }
-
-    std::cout << "Command: [" << command << "], Filename: [" << filename << "]\n";
-
-    if (command != "GET" || filename.empty()) {
-        std::string err = "ERR bad request\n";
-        sendAll(client_fd, err.c_str(), err.size());
-        close(client_fd);
-        return;
-    }
-
-    std::filesystem::path filePath =
-        std::filesystem::path("shared_files") / filename;
-
-    if (!std::filesystem::exists(filePath) ||
-        !std::filesystem::is_regular_file(filePath)) {
-        std::string err = "ERR file not found\n";
-        sendAll(client_fd, err.c_str(), err.size());
-        close(client_fd);
-        return;
-    }
-
-    uintmax_t fileSize = std::filesystem::file_size(filePath);
-
-    std::string header = "OK " + std::to_string(fileSize) + "\n";
-    if (!sendAll(client_fd, header.c_str(), header.size())) {
-        close(client_fd);
-        return;
-    }
-
-    std::ifstream file(filePath, std::ios::binary);
-    char buffer[65536];
-
-    while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0) {
-        std::streamsize bytesRead = file.gcount();
-
-        if (!sendAll(client_fd, buffer, static_cast<size_t>(bytesRead))) {
-            std::cerr << "Send failed mid-transfer\n";
-            break;
-        }
-    }
-
-    close(client_fd);
 }
 
 int main() {
@@ -129,7 +61,11 @@ int main() {
         num_threads = 8; // default to 8 if hardware_concurrency cannot determine
     }
     ThreadPool pool(num_threads); 
-
+    TransferRegistry registry;
+    Stats s;
+    Semaphore sm(5);
+    std::atomic<bool> running{true};
+    std::thread logger(statsLogger, std::ref(s), std::ref(running));
     // 5. Accept loop —
     while (true) {
         int client_fd = accept(listen_fd, nullptr, nullptr);
@@ -138,11 +74,13 @@ int main() {
             continue; // don't crash the whole server on one bad accept
         }
 
-        pool.submit([client_fd]() {
-            handleClient(client_fd);
+        pool.submit([client_fd, &registry, &sm, &s]() {
+            handleClient(client_fd, registry, sm, s);
         });
     }
 
     close(listen_fd);
+    running = false;
+    logger.join();
     return 0;
 }

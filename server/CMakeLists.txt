@@ -1,2 +1,4 @@
-add_executable(server main.cpp)
+add_executable(server main.cpp transfer_registry/transfer_registry.cpp)
 target_link_libraries(server PRIVATE thread_pool)
+target_include_directories(server PRIVATE client_handler)
+target_include_directories(server PRIVATE transfer_registry)
