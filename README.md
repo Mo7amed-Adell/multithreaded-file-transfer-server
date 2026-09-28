@@ -1,29 +1,32 @@
 # multithreaded-file-transfer-server
 ```mermaid
-flowchart LR
-    subgraph Clients
-        C[Clients]
-    
+flowchart TD
+    C1[Client 1]
+    C2[Client 2]
+    C3[Client 3]
 
-    subgraph Server
-        ACC[Accept loop<br/>main thread]
-        POOL[ThreadPool<br/>task queue + N workers]
-    
+    subgraph SERVER[Server]
+        ACC[Accept loop]
+        POOL[Thread pool<br/>N worker threads]
+        SEM[Semaphore<br/>max 5 active transfers]
+        T1[Task: client 1]
+        T2[Task: client 2]
+        T3[Task: client 3]
+        REG[Transfer registry<br/>shared_mutex]
+        STATS[Global stats<br/>atomic counters]
+    end
 
-    subgraph Shared state
-        SEM[Semaphore<br/>max 5 transfers]
-        REG[TransferRegistry<br/>shared_mutex]
-        STATS[Stats<br/>atomics]
-    
+    SHUT[Shutdown mechanism<br/>signal handler sets atomic flag,<br/>watcher thread closes listen socket]
 
-    subgraph Shutdown
-        SIG[SIGINT / SIGTERM] --> FLAG[shuttingDown<br/>atomic flag]
-        FLAG --> WATCH[Watcher thread]
-
-    C -->|GET file| ACC --> POOL
-    POOL --> SEM
-    POOL --> REG
-    POOL --> STATS
-    LOG[Stats logger thread] --> STATS
-    WATCH -.->|closes listen socket| ACC
+    C1 --> ACC
+    C2 --> ACC
+    C3 --> ACC
+    ACC -->|submit| POOL
+    POOL --> T1
+    POOL --> T2
+    POOL --> T3
+    SEM -.->|caps concurrency| POOL
+    POOL -->|update progress| REG
+    POOL -->|add bytes| STATS
+    SERVER -->|shutdown| SHUT
 ```
