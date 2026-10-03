@@ -21,9 +21,6 @@ void handleSignal(int signum) {
 // Function to log stats periodically
 void statsLogger(Stats& stats, std::atomic<bool>& shuttingDown) {
     while (!shuttingDown.load(std::memory_order_relaxed)) {
-        std::cout << "[STATS] active=" << stats.activeTransferCount.load()
-                   << " totalBytes=" << stats.totalBytesTransferred.load()
-                   << "\n";
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 }

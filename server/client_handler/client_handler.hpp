@@ -8,6 +8,7 @@
 #include <vector>
 #include <optional>
 #include <thread>
+#include <chrono>
 #include "../transfer_registry/transfer_registry.hpp"
 #include "../../thread_pool/Semaphore.hpp"
 
@@ -104,6 +105,7 @@ inline void handleClient(int client_fd, TransferRegistry& rgstry, Semaphore& sm,
             totalSent += static_cast<uint64_t>(bytesRead);
             rgstry.updateProgress(transferId, totalSent);
             stats.totalBytesTransferred.fetch_add(static_cast<uint64_t>(bytesRead), std::memory_order_relaxed);
+             std::this_thread::sleep_for(std::chrono::milliseconds(60)); // Simulate slower transfer for testing we can remove this later
         }
             stats.activeTransferCount.fetch_sub(1, std::memory_order_relaxed);
         if (success) {
